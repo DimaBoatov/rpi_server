@@ -1,0 +1,20 @@
+[Unit]
+Description=Local antenna rotation controller
+After=network.target
+
+[Service]
+Type=simple
+User=antenna
+Group=antenna
+SupplementaryGroups=gpio
+WorkingDirectory=/opt/antenna
+ExecStart=/usr/bin/python3 /opt/antenna/server.py --config /opt/antenna/config.json
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

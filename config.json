@@ -1,0 +1,12 @@
+{
+  "host": "0.0.0.0",
+  "port": 8080,
+  "motor": "simulation",
+  "min_angle": 0,
+  "max_angle": 180,
+  "initial_angle": 90,
+  "speed_deg_per_second": 30,
+  "servo_gpio": 18,
+  "servo_min_pulse_ms": 1.0,
+  "servo_max_pulse_ms": 2.0
+}

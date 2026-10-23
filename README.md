@@ -1,105 +1,163 @@
-# Raspberry Pi Web Server
+# Керування поворотом антени на Raspberry Pi
 
-A starting point for hosting a website on a Raspberry Pi using Raspberry Pi OS and Nginx. This repository currently contains setup documentation; add your website files as the project develops.
+Простий локальний вебсервер на Python із головною сторінкою керування антеною. На Mac працює імітація мотора без додаткових бібліотек і віртуалізації. На Raspberry Pi сервер запускається напряму, без Docker, Nginx і віртуальних машин.
 
-## Requirements
+## Можливості
 
-- Raspberry Pi with Raspberry Pi OS installed
-- microSD card and suitable power supply
-- Ethernet or Wi-Fi connection
-- Terminal access, either locally or over SSH
-- A user account with `sudo` privileges
+- Задання кута повороту, плавна зміна командованого положення та зупинка.
+- Кнопка «Один оберт 360°» в імітації та з позиційною сервою: один градус кожні 0,5 секунди, один повний оберт приблизно за 3 хвилини. Починається з поточного положення й завершується в тому самому напрямку. «Зупинити» перериває цикл, звичайна команда повороту замінює його. Для цього сценарію діапазон імітації становить повне коло незалежно від меж ручного повороту; для реальної серви потрібен калібрований доступний хід 360° від поточного положення. Напрямок вибирається автоматично в межах діапазону. Звичайна серва на 180° цей сценарій виконати не може. Серва безперервного обертання без датчика положення також не підтримується.
+- Налаштування меж кута і швидкості у `config.json`.
+- Режим `simulation` для розробки та режим `servo` через GPIO Zero для позиційної серви.
+- Сторінка адаптована до телефона, працює без інтернету та зовнішніх ресурсів.
 
-## Set up the server
+Кроковий мотор ще не реалізовано: потрібні модель драйвера, кількість кроків на оберт, передатне число та схема кінцевиків / пошуку нуля. Серва безперервного обертання для режиму `servo` не підходить.
 
-Run these commands on your Raspberry Pi.
+## Запуск на Mac
 
-### 1. Update the system
+Потрібен Python 3.9 або новіший. У каталозі репозиторію:
+
+```bash
+python3 --version
+python3 server.py
+```
+
+Відкрийте **http://localhost:8080**. За замовчуванням увімкнено імітацію: задайте кут і натисніть «Повернути». «Зупинити» припиняє рух. Для завершення сервера натисніть `Ctrl+C`.
+
+З іншого пристрою в тій самій мережі відкрийте `http://<IP_МАКА>:8080`. Якщо macOS запитає дозвіл для вхідних з’єднань Python, дозвольте його для цього тесту.
+
+## Запуск на Raspberry Pi
+
+Встановіть Raspberry Pi OS, підключіть Pi до локальної мережі через Wi-Fi або Ethernet. У терміналі Pi:
 
 ```bash
 sudo apt update
-sudo apt upgrade -y
+sudo apt install -y git python3
+git clone https://github.com/DimaBoatov/rpi_server.git
+cd rpi_server
+python3 server.py
 ```
 
-### 2. Install Nginx
+Дізнайтеся адресу Pi командою `hostname -I`. На телефоні або комп’ютері в тій самій мережі відкрийте **http://<IP_PI>:8080**. Якщо в системі працює mDNS і hostname Pi — `raspberrypi`, можна спробувати **http://raspberrypi.local:8080**. Для постійної адреси налаштуйте DHCP reservation у роутері.
+
+Сервер слухає всі мережеві інтерфейси (`0.0.0.0`). Автоматичне відкриття сторінки після підключення до Wi-Fi та створення власної Wi-Fi точки доступу Pi поки не налаштовані. Поточний варіант передбачає спільну мережу роутера; сторінку відкривають у браузері вручну.
+
+## Налаштування
+
+Змініть `config.json` і перезапустіть сервер. Інший файл можна передати через `python3 server.py --config /path/to/config.json`.
+
+| Параметр | Значення за замовчуванням | Призначення |
+| --- | --- | --- |
+| `host` | `0.0.0.0` | Адреса прослуховування; `127.0.0.1` обмежує доступ поточним пристроєм |
+| `port` | `8080` | HTTP-порт |
+| `motor` | `simulation` | `simulation` або `servo` |
+| `min_angle`, `max_angle` | `0`, `180` | Дозволений діапазон, градуси |
+| `initial_angle` | `90` | Початкове припущення про положення |
+| `speed_deg_per_second` | `30` | Швидкість зміни командованого кута |
+| `servo_gpio` | `18` | Номер сигнального GPIO за схемою BCM |
+| `servo_min_pulse_ms`, `servo_max_pulse_ms` | `1.0`, `2.0` | Імпульси для мінімального й максимального кутів |
+
+Ці кути та імпульси — приклад, а не калібрування вашого механізму. Не вмикайте реальну серву до перевірки її специфікації, меж і підключення.
+
+## Підключення позиційної серви
+
+На Raspberry Pi встановіть GPIO Zero та GPIO backend:
 
 ```bash
-sudo apt install nginx -y
-sudo systemctl enable --now nginx
+sudo apt install -y python3-gpiozero python3-lgpio
 ```
 
-Check that the web server is running:
+Підключіть сигнальний провід до налаштованого GPIO (BCM18 — фізичний контакт 12). Живлення серви має відповідати її напрузі та струму; використовуйте відповідне зовнішнє живлення зі спільною землею з Pi. Не живіть мотор із сигнального GPIO. Перевірте сумісність сигнального входу з 3.3 V.
+
+Вкажіть `"motor": "servo"`, налаштуйте калібровані межі та імпульси. Запускайте від користувача з доступом до GPIO. Наявність пакета не гарантує підтримку будь-якої плати / ОС: перевірте backend на вашій моделі Pi.
+
+На старті PWM вимкнено. Після першої команди серва може стрибнути до розрахункового початкового положення: зворотного зв’язку немає. Спочатку перевіряйте без приєднаної антени. Показаний кут — оцінка, він не вимірюється датчиком і не зберігається після перезапуску.
+
+«Зупинити» відключає PWM серви, тому утримання положення може зникнути. Це програмна зупинка, не аварійне механічне гальмо. Після досягнення цілі PWM залишається активним для утримання. Закриття браузера або втрата Wi-Fi не скасовують уже заданий поворот. Кілька клієнтів керують спільною ціллю; остання команда має пріоритет.
+
+Документація: [GPIO Zero AngularServo](https://gpiozero.readthedocs.io/en/latest/api_output.html#angularservo).
+
+## Автозапуск на Raspberry Pi
+
+Після SSH-підключення до Pi встановіть Git і завантажте репозиторій:
 
 ```bash
-systemctl status nginx
+sudo apt update
+sudo apt install -y git
+git clone https://github.com/DimaBoatov/rpi_server.git
+cd rpi_server
+bash deploy/install.sh
 ```
 
-### 3. Open the website
+Для публічного репозиторію клонування не потребує токена. Для приватного потрібен доступ до GitHub через SSH-ключ або токен із правом читання.
 
-Find the Raspberry Pi's local IP address:
+Скрипт запросить sudo, встановить Python, створить службового користувача `antenna`, скопіює файли в `/opt/antenna`, увімкне автозапуск і перевірить HTTP API. Після завершення можна закрити SSH: сервер продовжить працювати та запускатиметься після перезавантаження Pi. На першій установці використовується `config.json` із репозиторію (за замовчуванням імітація).
+
+Для встановлення бібліотек реальної серви:
 
 ```bash
-hostname -I
+bash deploy/install.sh --with-gpio
 ```
 
-On a device connected to the same network, open `http://<PI_IP_ADDRESS>` in a browser. Replace `<PI_IP_ADDRESS>` with the Pi's local address, for example `192.168.1.50`. You should see the Nginx welcome page.
-
-## Publish website files
-
-Nginx's default website directory on Raspberry Pi OS is `/var/www/html`.
-
-To create a simple home page, run:
+Цей прапорець лише встановлює GPIO-бібліотеки; режим мотора не змінюється. Налаштування встановленого сервера редагуються окремо:
 
 ```bash
-printf '%s\n' '<!doctype html>' '<html lang="en">' '<meta charset="utf-8">' '<title>Raspberry Pi Web Server</title>' '<h1>Hello from Raspberry Pi!</h1>' '</html>' | sudo tee /var/www/html/index.html > /dev/null
+sudo nano /opt/antenna/config.json
+sudo systemctl restart antenna
 ```
 
-Refresh the browser to see the new page. This command replaces an existing `index.html`, so back it up first if needed.
-
-For a larger static website, copy its HTML, CSS, JavaScript, and image files into `/var/www/html`. Keep `index.html` at the root of that directory. Static file changes do not require restarting Nginx.
-
-## Manage the server
-
-| Task | Command |
-| --- | --- |
-| Check status | `sudo systemctl status nginx` |
-| Start | `sudo systemctl start nginx` |
-| Stop | `sudo systemctl stop nginx` |
-| Restart | `sudo systemctl restart nginx` |
-| Validate configuration | `sudo nginx -t` |
-| Reload configuration | `sudo systemctl reload nginx` |
-| View access logs | `sudo tail -f /var/log/nginx/access.log` |
-| View error logs | `sudo tail -f /var/log/nginx/error.log` |
-
-After editing Nginx configuration, validate it before reloading:
+Повторний запуск оновлює код і службу, але **зберігає `/opt/antenna/config.json`**. Зміни конфігурації в репозиторії автоматично не переносяться. Оновлення запускайте, коли механізм зупинений: служба перезапускається.
 
 ```bash
-sudo nginx -t && sudo systemctl reload nginx
+cd ~/rpi_server
+git pull --ff-only
+bash deploy/install.sh
 ```
 
-## Network access and security
+На Mac відкрийте `http://ckooharpi2w.local:8080` (для Pi з hostname `ckooharpi2w`) або `http://<IP_PI>:8080`. Mac і Pi мають бути в одній мережі. Якщо порт чи host змінено, використовуйте налаштовану адресу.
 
-These instructions set up an HTTP server for your local network. For a stable local address, configure a DHCP reservation for the Raspberry Pi in your router.
+Якщо встановлення завершилося помилкою, перевірте повідомлення та логи нижче; після усунення причини скрипт можна запустити повторно. Скрипт призначений для Raspberry Pi OS / Debian із systemd, на Mac його запускати не потрібно.
 
-Before making the server accessible from the internet:
+```bash
+sudo systemctl status antenna
+sudo journalctl -u antenna -f
+sudo systemctl restart antenna
+sudo systemctl stop antenna
+```
 
-- Install system updates regularly.
-- Use SSH keys and protect administrative access.
-- Configure a firewall to allow only required services, preserving SSH access if you manage the Pi remotely.
-- Configure a domain and HTTPS with a valid TLS certificate.
-- Review router port forwarding and expose only the services you intend to publish.
-- Keep credentials, private keys, and other sensitive files outside the website directory and this repository.
+## API
 
-## Troubleshooting
+| Метод | Шлях | Тіло / результат |
+| --- | --- | --- |
+| GET | `/` | Сторінка керування |
+| GET | `/api/state` | Режим, розрахунковий кут, ціль, межі, стан руху і помилка |
+| POST | `/api/move` | JSON `{"angle": 120}` |
+| POST | `/api/stop` | JSON `{}` |
+| POST | `/api/rotate` | JSON `{}`; один оберт 360° |
 
-- **Website does not load:** Confirm that both devices are on the same network, verify the Pi's IP address, and check the Nginx service status.
-- **Welcome page still appears:** Confirm that your `index.html` is in `/var/www/html` and refresh the browser cache.
-- **403 Forbidden:** Check file permissions and ensure the website directory contains an index file readable by Nginx.
-- **Configuration reload fails:** Run `sudo nginx -t` and inspect the error log.
+```bash
+curl -H 'Content-Type: application/json' \
+  -d '{"angle":120}' http://localhost:8080/api/move
+curl -H 'Content-Type: application/json' \
+  -d '{}' http://localhost:8080/api/stop
+```
 
-## Possible next steps
+Сервер призначений для довіреної локальної мережі: авторизації та TLS немає, усі пристрої з доступом до порту можуть керувати антеною. Не публікуйте порт в інтернеті. Стандартний [Python HTTP server](https://docs.python.org/3/library/http.server.html) має лише базові перевірки безпеки.
 
-- Add website source files to this repository.
-- Document deployment steps specific to your application.
-- Add HTTPS, backups, and monitoring.
-- Add a reverse proxy configuration if the project later includes an application server.
+## Перевірка
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+Тести використовують імітацію та перевіряють сторінку, API, поворот, зупинку, обмеження кутів і відхилення некоректних запитів. Реальне обладнання потрібно перевіряти окремо.
+
+## Структура
+
+```text
+server.py               HTTP API та контролер мотора
+config.json             Мережа, кути, швидкість і GPIO
+static/index.html       Сторінка керування
+deploy/antenna.service   Автозапуск через systemd
+deploy/install.sh        Установка та оновлення сервера на Pi
+tests/test_server.py     Перевірки у режимі імітації
+```
