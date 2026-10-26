@@ -85,6 +85,10 @@ config = json.load(open(sys.argv[1]))
 host = config['host']
 if host == '0.0.0.0':
     host = '127.0.0.1'
+elif host == '::':
+    host = '::1'
+if ':' in host:
+    host = f'[{host}]'
 url = f"http://{host}:{config['port']}/api/state"
 for _ in range(15):
     try:

@@ -1,4 +1,6 @@
 import json
+import socket
+from http.client import HTTPConnection
 import threading
 import time
 import unittest
@@ -7,7 +9,43 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from http.server import ThreadingHTTPServer
 
-from server import Controller, ROOT, handler_for
+from server import Controller, ROOT, create_server, handler_for
+
+
+class NetworkTests(unittest.TestCase):
+    def check_connections(self, bind_host, clients):
+        controller = Mock()
+        controller.state.return_value = {'mode': 'simulation'}
+        server = create_server(bind_host, 0, handler_for(controller))
+        thread = threading.Thread(target=server.serve_forever)
+        thread.start()
+        try:
+            for host in clients:
+                with self.subTest(host=host):
+                    connection = HTTPConnection(host, server.server_port, timeout=2)
+                    try:
+                        connection.request('GET', '/api/state')
+                        response = connection.getresponse()
+                        self.assertEqual(response.status, 200)
+                        self.assertEqual(json.loads(response.read()), {'mode': 'simulation'})
+                    finally:
+                        connection.close()
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
+
+    @unittest.skipUnless(socket.has_dualstack_ipv6(), 'Dual-stack IPv6 unavailable')
+    def test_wildcard_accepts_ipv4_and_ipv6(self):
+        for host in ('0.0.0.0', '::'):
+            with self.subTest(bind=host):
+                self.check_connections(host, ['127.0.0.1', '::1'])
+
+    def test_ipv4_loopback_and_ipv4_only_fallback(self):
+        from unittest.mock import patch
+        with patch('server.socket.has_dualstack_ipv6', return_value=False):
+            self.check_connections('0.0.0.0', ['127.0.0.1'])
+        self.check_connections('127.0.0.1', ['127.0.0.1'])
 
 
 class ServerTests(unittest.TestCase):

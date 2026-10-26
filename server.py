@@ -4,6 +4,7 @@ import json
 import math
 from pathlib import Path
 import signal
+import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -201,6 +202,24 @@ def handler_for(controller):
     return Handler
 
 
+class IPv6HTTPServer(ThreadingHTTPServer):
+    address_family = socket.AF_INET6
+
+    def server_bind(self):
+        # Explicitly accept IPv4-mapped connections on the wildcard socket.
+        self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY,
+                               0 if self.server_address[0] == '::' else 1)
+        super().server_bind()
+
+
+def create_server(host, port, handler):
+    if host in ('0.0.0.0', '::') and socket.has_dualstack_ipv6():
+        return IPv6HTTPServer(('::', port), handler)
+    if ':' in host:
+        return IPv6HTTPServer((host, port), handler)
+    return ThreadingHTTPServer((host, port), handler)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=Path, default=ROOT / 'config.json')
@@ -208,12 +227,14 @@ def main():
     config = json.loads(args.config.read_text())
     controller = Controller(config)
     try:
-        server = ThreadingHTTPServer((config['host'], config['port']), handler_for(controller))
+        server = create_server(config['host'], config['port'], handler_for(controller))
         def terminate(*_):
             raise KeyboardInterrupt
 
         signal.signal(signal.SIGTERM, terminate)
-        print(f"Antenna controller: http://{config['host']}:{config['port']} ({config['motor']})", flush=True)
+        host = server.server_address[0]
+        display_host = f'[{host}]' if ':' in host else host
+        print(f"Antenna controller: http://{display_host}:{server.server_port} ({config['motor']})", flush=True)
         try:
             server.serve_forever()
         except KeyboardInterrupt:
