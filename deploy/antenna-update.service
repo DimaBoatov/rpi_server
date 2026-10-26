@@ -1,0 +1,9 @@
+[Unit]
+Description=Update antenna controller from GitHub master
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/antenna-update
+TimeoutStartSec=15min
