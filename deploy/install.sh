@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Run on Raspberry Pi OS: bash deploy/install.sh [--with-gpio]
+# Run on Ubuntu: bash deploy/install.sh [--with-gpio]
 set -euo pipefail
 
 WITH_GPIO=0
