@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parent
 
 class Controller:
     def __init__(self, config):
-        self.config = config
+        self.config = dict(config)
         for key in ('min_angle', 'max_angle', 'initial_angle', 'speed_deg_per_second'):
             value = config[key]
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
@@ -36,13 +36,7 @@ class Controller:
         self.quit = threading.Event()
         self.servo = None
         if config['motor'] == 'servo':
-            from gpiozero import AngularServo
-            self.servo = AngularServo(
-                config['servo_gpio'], initial_angle=None,
-                min_angle=config['min_angle'], max_angle=config['max_angle'],
-                min_pulse_width=config['servo_min_pulse_ms'] / 1000,
-                max_pulse_width=config['servo_max_pulse_ms'] / 1000,
-            )
+            self.servo = self.create_servo()
         self.worker = threading.Thread(target=self.run, daemon=True)
         self.worker.start()
 
@@ -50,9 +44,50 @@ class Controller:
         with self.lock:
             return dict(mode=self.config['motor'], angle=round(self.angle, 1),
                         target=self.target, moving=not self.stopped,
-                        min_angle=self.config['min_angle'], max_angle=self.config['max_angle'],
+                        min_angle=self.limits()[0], max_angle=self.limits()[1],
                         error=self.error, position_source='estimated',
                         rotation_degrees=self.rotation['steps'] if self.rotation else None)
+
+    def limits(self):
+        if self.config['motor'] == 'simulation':
+            return 0, 360
+        return self.config['min_angle'], self.config['max_angle']
+
+    def create_servo(self):
+        from gpiozero import AngularServo
+        return AngularServo(
+            self.config['servo_gpio'], initial_angle=None,
+            min_angle=self.config['min_angle'], max_angle=self.config['max_angle'],
+            min_pulse_width=self.config['servo_min_pulse_ms'] / 1000,
+            max_pulse_width=self.config['servo_max_pulse_ms'] / 1000,
+        )
+
+    def set_mode(self, mode):
+        if mode not in ('simulation', 'servo'):
+            raise ValueError('Невідомий режим: потрібен simulation або servo')
+        with self.lock:
+            if mode == self.config['motor']:
+                return
+            if mode == 'servo':
+                try:
+                    servo = self.create_servo()
+                except Exception as exc:
+                    raise ValueError('Не вдалося ввімкнути робочий режим. Перевірте GPIO-бібліотеки, доступ до GPIO та підключення серви.') from exc
+                self.servo = servo
+            else:
+                if self.servo:
+                    try:
+                        self.servo.close()
+                    except Exception as exc:
+                        raise ValueError('Не вдалося вимкнути GPIO серви') from exc
+                self.servo = None
+            self.config['motor'] = mode
+            # Simulation cannot establish the real position of the mechanism.
+            self.angle = float(self.config['initial_angle'])
+            self.target = self.angle
+            self.rotation = None
+            self.stopped = True
+            self.error = None
 
     def rotate(self):
         with self.lock:
@@ -93,9 +128,10 @@ class Controller:
     def move(self, angle):
         if isinstance(angle, bool) or not isinstance(angle, (int, float)) or not math.isfinite(angle):
             raise ValueError('Кут має бути скінченним числом')
-        if not self.config['min_angle'] <= angle <= self.config['max_angle']:
-            raise ValueError('Кут за межами дозволеного діапазону')
         with self.lock:
+            low, high = self.limits()
+            if not low <= angle <= high:
+                raise ValueError('Кут за межами дозволеного діапазону')
             if self.error:
                 raise ValueError('Помилка мотора; перевірте обладнання і перезапустіть сервер')
             self.rotation = None
@@ -176,7 +212,7 @@ def handler_for(controller):
                 return self.reply(403, {'error': 'Cross-site request rejected'})
             if self.headers.get('Content-Type', '').split(';')[0].strip() != 'application/json':
                 return self.reply(415, {'error': 'Expected application/json'})
-            if self.path not in ('/api/move', '/api/stop', '/api/rotate'):
+            if self.path not in ('/api/move', '/api/stop', '/api/rotate', '/api/mode'):
                 return self.reply(404, {'error': 'Not found'})
             try:
                 length = int(self.headers.get('Content-Length', '0'))
@@ -189,6 +225,8 @@ def handler_for(controller):
                     controller.move(data.get('angle'))
                 elif self.path == '/api/rotate':
                     controller.rotate()
+                elif self.path == '/api/mode':
+                    controller.set_mode(data.get('mode'))
                 else:
                     controller.stop()
                 self.reply(200, controller.state())

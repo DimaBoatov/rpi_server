@@ -4,12 +4,15 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Керування антеною</title>
 <style>
-:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#101820;color:#eef5fa}*{box-sizing:border-box}body{margin:0;padding:24px}main{max-width:580px;margin:30px auto}h1{font-size:30px;margin-bottom:8px}.muted{color:#aabdc9}section{background:#1b2a35;padding:24px;border:1px solid #344955;border-radius:20px;margin:22px 0}.angle{font-size:64px;font-weight:700;margin:18px 0}.dial{height:240px;display:grid;place-items:center;border-bottom:2px solid #496576;margin-bottom:20px;overflow:hidden}#arrow{font-size:100px;display:inline-block;transform-origin:50% 50%;color:#72d8b4}label{display:block;margin:18px 0 10px}input[type=range]{width:100%;accent-color:#72d8b4}input[type=number]{width:100%;padding:12px;border-radius:8px;background:#101820;color:white;border:1px solid #496576;font-size:20px}.row{display:flex;gap:12px;margin-top:18px}button{flex:1;border:0;border-radius:10px;background:#72d8b4;color:#10281f;padding:16px;font-size:17px;font-weight:650;cursor:pointer}button:disabled{opacity:.45;cursor:wait}#stop{background:#ff807e;color:#381212}#message{min-height:26px;color:#ffb7a1}small{line-height:1.6}#status{color:#72d8b4}
+:root{color-scheme:dark;font-family:system-ui,sans-serif;background:#101820;color:#eef5fa}*{box-sizing:border-box}body{margin:0;padding:24px}main{max-width:580px;margin:30px auto}h1{font-size:30px;margin-bottom:8px}.muted{color:#aabdc9}section{background:#1b2a35;padding:24px;border:1px solid #344955;border-radius:20px;margin:22px 0}.angle{font-size:64px;font-weight:700;margin:18px 0}.dial{height:240px;display:grid;place-items:center;border-bottom:2px solid #496576;margin-bottom:20px;overflow:hidden}#arrow{font-size:100px;display:inline-block;transform-origin:50% 50%;color:#72d8b4}label{display:block;margin:18px 0 10px}input[type=range]{width:100%;accent-color:#72d8b4}input[type=number]{width:100%;padding:12px;border-radius:8px;background:#101820;color:white;border:1px solid #496576;font-size:20px}.row{display:flex;gap:12px;margin-top:18px}button{flex:1;border:0;border-radius:10px;background:#72d8b4;color:#10281f;padding:16px;font-size:17px;font-weight:650;cursor:pointer}button:disabled{opacity:.45;cursor:wait}#stop{background:#ff807e;color:#381212}#message{min-height:26px;color:#ffb7a1}small{line-height:1.6}#status{display:block;margin-top:18px;color:#72d8b4}
+.mode-switch{display:flex;align-items:center;gap:12px;cursor:pointer}.mode-switch input{appearance:none;width:52px;height:30px;border-radius:20px;background:#496576;position:relative;flex-shrink:0;margin:0;cursor:pointer}.mode-switch input:before{content:"";position:absolute;width:22px;height:22px;left:4px;top:4px;border-radius:50%;background:#fff;transition:transform .15s}.mode-switch input:checked{background:#25825f}.mode-switch input:checked:before{transform:translateX(22px)}.mode-switch input:focus-visible{outline:2px solid #72d8b4;outline-offset:4px}.mode-switch input:disabled{opacity:.45;cursor:wait}
 </style>
 <main>
   <h1>Керування антеною</h1>
   <p class="muted">Поворот у локальній мережі · <span id="mode">Підключення…</span></p>
   <section>
+    <label class="mode-switch" for="working-mode"><input id="working-mode" type="checkbox" role="switch" disabled><span>Робочий режим · GPIO</span></label>
+    <small class="muted" id="mode-help">Вимкнено — симуляція. Увімкнено — керування позиційною сервою.</small>
     <span id="status" role="status">Очікування сервера</span>
     <div class="row"><button id="rotate" disabled>Один оберт 360°</button></div>
     <p class="muted" id="rotation-info">1° кожні 0,5 с · повний оберт ≈ 3 хв</p>
@@ -17,9 +20,9 @@
     <div class="angle"><span id="angle">—</span>°</div>
     <small class="muted">Розрахункове положення · ціль <span id="target">—</span>°</small>
     <label for="slider">Бажаний кут <span id="limits"></span></label>
-    <input id="slider" type="range" min="0" max="180" value="90" disabled>
+    <input id="slider" type="range" min="0" max="360" value="90" disabled>
     <label for="input">Кут у градусах</label>
-    <input id="input" type="number" min="0" max="180" value="90" step="1" disabled>
+    <input id="input" type="number" min="0" max="360" value="90" step="1" disabled>
     <div class="row"><button id="move" disabled>Повернути</button><button id="stop" disabled>Зупинити</button></div>
     <p id="message" role="alert"></p>
   </section>
@@ -29,7 +32,7 @@
 const el = id => document.getElementById(id);
 let initialized = false, busy = false, online = false, simulation = false, rotating = false;
 function controls(){
-  for(const id of ['move','stop','input','slider']) el(id).disabled = busy || !online;
+  for(const id of ['move','stop','input','slider','working-mode']) el(id).disabled = busy || !online;
   el('rotate').disabled = busy || !online || rotating;
 }
 async function request(path, body){
@@ -41,8 +44,13 @@ async function request(path, body){
   return data;
 }
 function render(s){
+  const modeChanged = simulation !== (s.mode === 'simulation');
   simulation = s.mode === 'simulation';
   rotating = s.rotation_degrees != null;
+  el('working-mode').checked = !simulation;
+  el('mode-help').textContent = simulation
+    ? 'Симуляція · 0–360°. Обладнання не рухається.'
+    : `Позиційна серва · ${s.min_angle}–${s.max_angle}°. Межі відповідають калібруванню в конфігурації.`;
   el('rotation-info').textContent = simulation ? 'Імітація · 1° кожні 0,5 с · ≈ 3 хв' : 'Мотор · 1° кожні 0,5 с · потрібен доступний хід 360°';
   el('mode').textContent = s.mode === 'simulation' ? 'Імітація' : 'Сервомотор';
   el('angle').textContent = s.angle;
@@ -51,7 +59,7 @@ function render(s){
   el('arrow').style.transform = `rotate(${s.angle}deg)`;
   for(const id of ['slider','input']){el(id).min=s.min_angle;el(id).max=s.max_angle;}
   el('limits').textContent = `(${s.min_angle}–${s.max_angle}°)`;
-  if(!initialized){el('slider').value=el('input').value=s.target;initialized=true;}
+  if(!initialized || modeChanged){el('slider').value=el('input').value=s.target;initialized=true;}
 }
 async function poll(){
   try{render(await request('/api/state'));online=true;}
@@ -64,6 +72,7 @@ async function command(path,body){
   catch(e){el('message').textContent=e.message;}
   finally{busy=false;controls();}
 }
+el('working-mode').onchange=async()=>{await command('/api/mode',{mode:el('working-mode').checked?'servo':'simulation'});el('working-mode').checked=!simulation;};
 el('slider').oninput=()=>{el('input').value=el('slider').value;};
 el('input').oninput=()=>{el('slider').value=el('input').value;};
 el('move').onclick=()=>{if(el('input').reportValidity() && el('input').value!=='') command('/api/move',{angle:Number(el('input').value)});};

@@ -4,7 +4,7 @@ from http.client import HTTPConnection
 import threading
 import time
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from http.server import ThreadingHTTPServer
@@ -89,10 +89,47 @@ class ServerTests(unittest.TestCase):
         time.sleep(0.08)
         self.assertFalse(stopped['moving'])
         self.assertEqual(stopped['angle'], self.controller.state()['angle'])
-        for value in (-1, 181, True, None, '90', float('nan')):
+        for value in (-1, 361, True, None, '90', float('nan')):
             with self.assertRaises(HTTPError) as error:
                 self.post('/api/move', {'angle': value})
             self.assertEqual(error.exception.code, 400)
+
+    def test_manual_full_range_with_existing_180_config(self):
+        self.controller.config['max_angle'] = 180
+        for angle in (0, 181, 270, 360):
+            state = self.post('/api/move', {'angle': angle})
+            self.assertEqual(state['target'], angle)
+            self.assertEqual(state['max_angle'], 360)
+        self.post('/api/stop', {})
+
+    def test_mode_switch_stops_and_releases_hardware(self):
+        self.post('/api/rotate', {})
+        servo = Mock()
+        with patch.object(self.controller, 'create_servo', return_value=servo):
+            state = self.post('/api/mode', {'mode': 'servo'})
+        self.assertEqual(state['mode'], 'servo')
+        self.assertFalse(state['moving'])
+        self.assertIsNone(state['rotation_degrees'])
+        self.assertEqual(state['angle'], 90)
+        self.assertEqual(state['max_angle'], 180)
+        self.assertNotIn('angle', servo.__dict__)
+        with self.assertRaises(HTTPError):
+            self.post('/api/move', {'angle': 360})
+        state = self.post('/api/mode', {'mode': 'simulation'})
+        servo.close.assert_called_once()
+        self.assertIsNone(self.controller.servo)
+        self.assertEqual(state['max_angle'], 360)
+        self.assertEqual(self.post('/api/move', {'angle': 360})['target'], 360)
+
+    def test_failed_mode_switch_keeps_simulation(self):
+        with patch.object(self.controller, 'create_servo', side_effect=OSError('GPIO unavailable')):
+            with self.assertRaises(HTTPError) as error:
+                self.post('/api/mode', {'mode': 'servo'})
+        self.assertEqual(error.exception.code, 400)
+        self.assertEqual(self.controller.state()['mode'], 'simulation')
+        self.assertIsNone(self.controller.servo)
+        with self.assertRaises(HTTPError):
+            self.post('/api/mode', {'mode': 'invalid'})
 
     def test_reject_form_and_cross_site(self):
         with self.assertRaises(HTTPError) as error:
